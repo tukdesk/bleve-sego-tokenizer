@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"sync"
 
 	"github.com/blevesearch/bleve/analysis"
 	"github.com/blevesearch/bleve/registry"
@@ -18,6 +19,9 @@ var (
 	_ analysis.Tokenizer = &SegoTokenizer{}
 
 	ideographRegexp = regexp.MustCompile(`\p{Han}+`)
+
+	dictSegmenterMap      = map[string]*sego.Segmenter{}
+	dictSegmenterMapMutex sync.Mutex
 )
 
 type SegoTokenizer struct {
@@ -27,8 +31,8 @@ type SegoTokenizer struct {
 }
 
 func NewSegoTokenizer(dictFiles string, nested, caseSensitive bool) (*SegoTokenizer, error) {
-	segmenter := new(sego.Segmenter)
-	if err := segmenter.LoadDictionary(dictFiles); err != nil {
+	segmenter, err := getSegoSegmenter(dictFiles)
+	if err != nil {
 		return nil, err
 	}
 
@@ -37,6 +41,24 @@ func NewSegoTokenizer(dictFiles string, nested, caseSensitive bool) (*SegoTokeni
 		nested:        nested,
 		caseSensitive: caseSensitive,
 	}, nil
+}
+
+func getSegoSegmenter(dictFiles string) (*sego.Segmenter, error) {
+	dictSegmenterMapMutex.Lock()
+	defer dictSegmenterMapMutex.Unlock()
+
+	if segmenter, ok := dictSegmenterMap[dictFiles]; ok {
+		return segmenter, nil
+	}
+
+	segmenter := new(sego.Segmenter)
+	if err := segmenter.LoadDictionary(dictFiles); err != nil {
+		return nil, err
+	}
+
+	dictSegmenterMap[dictFiles] = segmenter
+
+	return segmenter, nil
 }
 
 func (this *SegoTokenizer) Tokenize(b []byte) analysis.TokenStream {
